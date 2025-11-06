@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyBudget VN — Glass macOS (Animated)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: linear-gradient(135deg, #e8ecff 0%, #fff5ef 100%); min-height: 100vh; color: #111827; }
+    .glass { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); background: rgba(255,255,255,0.38); border: 1px solid rgba(255,255,255,0.55); box-shadow: 0 10px 30px rgba(0,0,0,0.08); border-radius: 20px; }
+    .btn { padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600; transition: transform .15s ease, opacity .15s ease, background .2s ease; cursor: pointer; }
+    .btn-primary { background: linear-gradient(135deg, #111827, #374151); color: #fff; }
+    .btn-primary:hover { transform: translateY(-1px); background: linear-gradient(135deg, #0b0f1a, #1f2937); }
+    .btn-ghost { background: rgba(255,255,255,0.6); color: #111827; border: 1px solid rgba(0,0,0,0.08); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.82); transform: translateY(-1px); }
+    .btn-danger { background:#ef4444; color:#fff; }
+    .btn-danger:hover { background:#dc2626; transform: translateY(-1px); }
+    dialog { border: none; border-radius: 20px; padding: 0; overflow: visible; }
+    dialog::backdrop { background: rgba(0,0,0,0.35); backdrop-filter: blur(6px); }
+
+    /* Animations */
+    @keyframes fadeScaleIn { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+    @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+    .animate-card { animation: fadeScaleIn .38s ease both; }
+    .animate-soft { animation: fadeIn .28s ease both; }
+
+    /* Inputs */
+    .input { background: rgba(255,255,255,0.8); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: .6rem .8rem; outline: none; }
+    .input:focus { box-shadow: 0 0 0 3px rgba(17,24,39,0.12); }
+  </style>
+</head>
+<body>
+  <div class="max-w-6xl mx-auto p-6">
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-3 mb-8 animate-soft">
+      <h1 class="text-3xl font-bold">💰 MyBudget VN <span class="text-gray-500 text-lg">(macOS Glass)</span></h1>
+      <div class="flex flex-wrap gap-3">
+        <button id="analyzeBtn" class="btn btn-ghost" title="Прокрутить к советам">🧠 Анализ месяца</button>
+        <button id="exportBtn" class="btn btn-ghost" title="Экспортировать CSV">⬇️ Экспорт CSV</button>
+        <button id="resetBtn" class="btn btn-danger" title="Очистить все данные">🗑 Очистить</button>
+        <button id="addCategoryBtn" class="btn btn-ghost" title="Добавить категорию">➕ Категория</button>
+        <button id="addBtn" class="btn btn-primary" title="Добавить доход или расход">＋ Добавить запись</button>
+      </div>
+    </header>
+
+    <!-- Top summary cards -->
+    <section class="grid md:grid-cols-3 gap-5 mb-8">
+      <div class="glass p-5 animate-card">
+        <div class="text-sm text-gray-600">Получено</div>
+        <div id="incomeSum" class="text-3xl font-semibold mt-1">—</div>
+      </div>
+      <div class="glass p-5 animate-card" style="animation-delay:.05s">
+        <div class="text-sm text-gray-600">Потрачено</div>
+        <div id="expenseSum" class="text-3xl font-semibold mt-1">—</div>
+      </div>
+      <div class="glass p-5 animate-card" style="animation-delay:.1s">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm text-gray-600">Баланс месяца</div>
+            <div id="balance" class="text-3xl font-semibold mt-1">—</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm text-gray-600">Потрачено от дохода</div>
+            <div id="spentPct" class="text-xl font-semibold mt-1">—</div>
+          </div>
+        </div>
+        <div class="mt-4 w-full bg-white/60 rounded-full h-2 overflow-hidden">
+          <div id="progressBar" class="h-2 bg-black rounded-full transition-all" style="width:0%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="grid lg:grid-cols-3 gap-5 mb-8">
+      <div class="glass p-5 lg:col-span-2 animate-card">
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="font-semibold">📊 Расходы по категориям (диаграмма)</h2>
+          <div class="text-sm text-gray-600">Текущий месяц: <span id="monthLabel"></span></div>
+        </div>
+        <canvas id="pieChart" height="140"></canvas>
+      </div>
+      <div class="glass p-5 animate-card" style="animation-delay:.05s">
+        <h2 class="font-semibold mb-2">📈 Динамика по дням</h2>
+        <canvas id="barChart" height="140"></canvas>
+      </div>
+    </section>
+
+    <!-- Category cards -->
+    <section id="categoryCards" class="mb-8 animate-soft">
+      <h2 class="text-xl font-semibold mb-3">💸 Расходы по категориям</h2>
+      <div id="categoriesGrid" class="grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+    </section>
+
+    <!-- Insights -->
+    <section class="glass p-5 mb-8 animate-card">
+      <h2 class="font-semibold mb-2">💬 Советы по бюджету</h2>
+      <div id="insights" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- Table -->
+    <section class="glass p-5 animate-card">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="font-semibold">📋 Все записи</h2>
+        <span class="text-sm text-gray-600">Только текущий месяц</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm" id="table">
+          <thead>
+            <tr class="text-left text-gray-600 border-b">
+              <th class="py-2">Дата</th>
+              <th class="py-2">Тип</th>
+              <th class="py-2">Категория</th>
+              <th class="py-2">Сумма</th>
+              <th class="py-2">Примечание</th>
+              <th class="py-2 text-right">Действия</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Modal: Add Category -->
+  <dialog id="modalCategory">
+    <form method="dialog" class="glass p-6 w-[90vw] max-w-sm animate-card">
+      <h3 class="text-xl font-semibold mb-4">Добавить категорию</h3>
+      <input id="newCategoryName" type="text" placeholder="Название категории" class="input w-full mb-4" />
+      <div class="flex justify-end gap-3">
+        <button id="closeCatModal" class="btn btn-ghost" value="cancel">Отмена</button>
+        <button id="saveCatBtn" class="btn btn-primary" value="default">Добавить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Modal: Add Entry -->
+  <dialog id="modal">
+    <form id="form" method="dialog" class="glass p-6 w-[92vw] max-w-md animate-card">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-xl font-semibold">Добавить запись</h3>
+        <button type="button" id="closeModal" class="btn btn-ghost">✕</button>
+      </div>
+      <div class="grid gap-3">
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2"><input type="radio" name="type" value="income" class="accent-black" checked /> Доход</label>
+          <label class="flex items-center gap-2"><input type="radio" name="type" value="expense" class="accent-black" /> Расход</label>
+        </div>
+        <input id="date" type="date" class="input" />
+        <select id="category" class="input"></select>
+        <input id="amount" type="number" min="0" step="1000" placeholder="Сумма (VND)" class="input" />
+        <input id="note" type="text" placeholder="Примечание" class="input" />
+      </div>
+      <div class="flex justify-end gap-3 mt-5">
+        <button class="btn btn-primary" id="saveBtn">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // ===== Utils
+      const fmt = new Intl.NumberFormat('ru-RU', { style:'currency', currency:'VND', maximumFractionDigits:0 });
+      const monthKey = (iso) => iso.slice(0,7);
+      const todayISO = () => new Date().toISOString().slice(0,10);
+
+      // ===== Storage
+      const STORAGE_KEY = 'mybudget_entries_v3';
+      const CAT_KEY = 'mybudget_categories_v3';
+      let entries = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      let categories = JSON.parse(localStorage.getItem(CAT_KEY) || '[]');
+      if (!Array.isArray(categories) || categories.length === 0) {
+        categories = ['доход','еда','кофе','алкоголь','одежда','транспорт','коммуналка','развлечения','жильё','долги','прочее'];
+        localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+      }
+
+      // ===== Elements
+      const modal = document.getElementById('modal');
+      const modalCategory = document.getElementById('modalCategory');
+      const form = document.getElementById('form');
+      const dateEl = document.getElementById('date');
+      const catEl = document.getElementById('category');
+      const amountEl = document.getElementById('amount');
+      const noteEl = document.getElementById('note');
+      const rowsEl = document.getElementById('rows');
+      const monthLabel = document.getElementById('monthLabel');
+
+      const addBtn = document.getElementById('addBtn');
+      const addCategoryBtn = document.getElementById('addCategoryBtn');
+      const exportBtn = document.getElementById('exportBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const analyzeBtn = document.getElementById('analyzeBtn');
+      const closeModalBtn = document.getElementById('closeModal');
+      const closeCatModalBtn = document.getElementById('closeCatModal');
+      const saveCatBtn = document.getElementById('saveCatBtn');
+      const newCategoryName = document.getElementById('newCategoryName');
+
+      const incomeSum = document.getElementById('incomeSum');
+      const expenseSum = document.getElementById('expenseSum');
+      const balanceEl = document.getElementById('balance');
+      const spentPct = document.getElementById('spentPct');
+      const progressBar = document.getElementById('progressBar');
+
+      // ===== Charts
+      let pie, bar;
+
+      // ===== Helpers
+      function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
+      function saveCats(){ localStorage.setItem(CAT_KEY, JSON.stringify(categories)); }
+      function populateCats(){ catEl.innerHTML = categories.map(c=>`<option value="${c}">${c}</option>`).join(''); }
+
+      // ===== Event bindings
+      addBtn.addEventListener('click', () => { populateCats(); form.reset(); dateEl.value = todayISO(); if(!modal.open) modal.showModal(); });
+      closeModalBtn.addEventListener('click', () => modal.close());
+
+      addCategoryBtn.addEventListener('click', () => { newCategoryName.value=''; if(!modalCategory.open) modalCategory.showModal(); });
+      closeCatModalBtn.addEventListener('click', () => modalCategory.close());
+      saveCatBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const name = (newCategoryName.value||'').trim();
+        if(!name) return alert('Введите название категории');
+        if(categories.includes(name)) return alert('Такая категория уже есть');
+        categories.push(name); saveCats(); modalCategory.close();
+        // мягкая подсказка
+        setTimeout(()=> alert(`Категория «${name}» добавлена`), 50);
+      });
+
+      exportBtn.addEventListener('click', () => {
+        const header = ['id','type','date','category','amount','note'];
+        const csv = [header.join(',')].concat(entries.map(e=> header.map(k=>""+String(e[k]??'').replaceAll('"','""')).map(v=>`"${v}`+`"`).join(','))).join('\n');
+        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href=url; a.download=`mybudget_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url);
+      });
+
+      resetBtn.addEventListener('click', () => {
+        if(confirm('Точно удалить все данные?')){ entries = []; save(); refresh(); }
+      });
+
+      analyzeBtn.addEventListener('click', () => document.getElementById('insights').scrollIntoView({ behavior:'smooth' }));
+
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const type = form.elements['type'].value; // income | expense
+        const date = dateEl.value || todayISO();
+        const category = catEl.value;
+        const amount = Number(amountEl.value||0);
+        const note = (noteEl.value||'').trim();
+        if(!amount || amount<=0) return alert('Укажи сумму');
+        entries.push({ id: crypto.randomUUID(), type, date, category, amount, note });
+        save(); modal.close(); refresh();
+      });
+
+      // таблица: удаление через делегирование
+      document.getElementById('table').addEventListener('click', (ev)=>{
+        const btn = ev.target.closest('[data-del]');
+        if(!btn) return;
+        const id = btn.getAttribute('data-del');
+        entries = entries.filter(x=> x.id !== id); save(); refresh();
+      });
+
+      // ===== Render
+      function renderCharts(monthEntries){
+        const byCat = {};
+        const byDay = {};
+        monthEntries.filter(e=> e.type==='expense' && e.category!=='долги').forEach(e=>{
+          byCat[e.category] = (byCat[e.category]||0)+e.amount;
+          byDay[e.date] = (byDay[e.date]||0)+e.amount;
+        });
+
+        // Pie
+        const pLabels = Object.keys(byCat);
+        const pData = Object.values(byCat);
+        if(pie) pie.destroy();
+        pie = new Chart(document.getElementById('pieChart'), {
+          type: 'doughnut',
+          data: { labels: pLabels, datasets: [{ data: pData, backgroundColor: ['#111827','#6366F1','#06B6D4','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899','#84CC16','#14B8A6'] }] },
+          options: { animation:{ duration: 450 }, plugins:{ legend:{ position:'bottom' } }, cutout:'60%' }
+        });
+
+        // Bar
+        const days = Array.from(new Set(monthEntries.map(e=>e.date))).sort();
+        const bLabels = days;
+        const bData = days.map(d=> byDay[d]||0);
+        if(bar) bar.destroy();
+        bar = new Chart(document.getElementById('barChart'), {
+          type: 'bar',
+          data: { labels: bLabels, datasets: [{ label:'Расходы/день', data: bData, backgroundColor: '#111827' }] },
+          options: { animation:{ duration: 450 }, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ maxRotation:0 } }, y:{ beginAtZero:true } } }
+        });
+      }
+
+      function renderCategoryCards(monthEntries){
+        const grid = document.getElementById('categoriesGrid');
+        grid.innerHTML = '';
+        const byCat = {};
+        monthEntries.filter(e=> e.type==='expense' && e.category!=='долги').forEach(e=> byCat[e.category]=(byCat[e.category]||0)+e.amount);
+        const totalExp = Object.values(byCat).reduce((a,b)=>a+b,0);
+        if(!totalExp){
+          grid.innerHTML = `<div class="glass p-4 text-center text-gray-500 animate-card">Пока нет данных по расходам</div>`; return;
+        }
+        Object.entries(byCat).sort((a,b)=>b[1]-a[1]).forEach(([cat,val],i)=>{
+          const percent = Math.round(val/totalExp*100);
+          const card = document.createElement('div');
+          card.className = 'glass p-4 animate-card';
+          card.style.animationDelay = (i*40)+'ms';
+          card.innerHTML = `
+            <div class='flex justify-between items-center mb-2'>
+              <div class='text-lg font-medium capitalize'>${cat}</div>
+              <div class='text-sm text-gray-500'>${percent}%</div>
+            </div>
+            <div class='text-2xl font-semibold mb-2'>${fmt.format(val)}</div>
+            <div class='w-full bg-white/60 rounded-full h-2 overflow-hidden'>
+              <div class='h-2 bg-black/80 rounded-full' style='width:${percent}%'></div>
+            </div>`;
+          grid.appendChild(card);
+        });
+      }
+
+      function buildInsights(monthEntries){
+        const box = document.getElementById('insights');
+        box.innerHTML = '';
+        if(monthEntries.length===0){ box.innerHTML = `<div class='glass p-4 animate-card'>Пока нет данных</div>`; return; }
+        const income = monthEntries.filter(e=>e.type==='income').reduce((a,b)=>a+b.amount,0);
+        const expense = monthEntries.filter(e=>e.type==='expense' && e.category!=='долги').reduce((a,b)=>a+b.amount,0);
+        const byCat = {};
+        monthEntries.filter(e=> e.type==='expense' && e.category!=='долги').forEach(e=> byCat[e.category]=(byCat[e.category]||0)+e.amount);
+
+        const cards = [];
+        const pct = income>0 ? (expense/income*100) : 0;
+        if(income===0 && expense>0){
+          cards.push(['ℹ️','Добавь доходы','Чтобы увидеть баланс и проценты — внеси поступления.']);
+        } else if(pct>80){
+          cards.push(['🚨','Высокая доля трат',`Потрачено ${pct.toFixed(0)}% дохода. Сделай «экономный уикенд» — минус 300–800 тыс. ₫.`]);
+        } else if(pct>0){
+          cards.push(['✅','Темп нормальный',`Сейчас израсходовано ${pct.toFixed(0)}% дохода.`]);
+        }
+        Object.entries(byCat).sort((a,b)=>b[1]-a[1]).slice(0,3).forEach(([cat,sum])=>{
+          const cut = Math.round(sum*0.25);
+          cards.push(['💡',`Категория: ${cat}`,`${fmt.format(sum)} за месяц. Сокращение на ~25% даст ~${fmt.format(cut)} экономии.`]);
+        });
+
+        cards.forEach((c,i)=>{
+          const el = document.createElement('div');
+          el.className = 'glass p-4 animate-card'; el.style.animationDelay=(i*40)+'ms';
+          el.innerHTML = `<div class='text-2xl'>${c[0]}</div><div class='font-semibold mt-1'>${c[1]}</div><div class='text-sm text-gray-600 mt-1'>${c[2]}</div>`;
+          box.appendChild(el);
+        });
+      }
+
+      function renderTable(monthEntries){
+        rowsEl.innerHTML = '';
+        const data = monthEntries.slice().sort((a,b)=> a.date.localeCompare(b.date));
+        data.forEach((e,i)=>{
+          const tr = document.createElement('tr');
+          tr.className = 'border-b hover:bg-white/60 animate-soft';
+          tr.style.animationDelay = (i*18)+'ms';
+          tr.innerHTML = `
+            <td class='py-2'>${e.date}</td>
+            <td class='py-2'><span class='px-2 py-1 rounded-full ${e.type==='income'?'bg-green-600 text-white':'bg-black text-white'}'>${e.type==='income'?'доход':'расход'}</span></td>
+            <td class='py-2'>${e.category}</td>
+            <td class='py-2 font-medium'>${fmt.format(e.amount)}</td>
+            <td class='py-2 text-gray-700'>${(e.note||'')}</td>
+            <td class='py-2 text-right'><button class='btn btn-ghost text-sm' data-del='${e.id}'>Удалить</button></td>`;
+          rowsEl.appendChild(tr);
+        });
+      }
+
+      function refresh(){
+        const m = monthKey(todayISO());
+        monthLabel.textContent = m;
+        const monthEntries = entries.filter(e=> monthKey(e.date)===m);
+        const income = monthEntries.filter(e=>e.type==='income').reduce((a,b)=>a+b.amount,0);
+        const expense = monthEntries.filter(e=>e.type==='expense' && e.category!=='долги').reduce((a,b)=>a+b.amount,0);
+        incomeSum.textContent = income? fmt.format(income) : '—';
+        expenseSum.textContent = expense? fmt.format(expense) : '—';
+        balanceEl.textContent = fmt.format(income-expense);
+        const pct = income>0 ? Math.min(100, Math.round(expense/income*100)) : 0;
+        spentPct.textContent = income>0? pct+'%':'—';
+        progressBar.style.width = pct+'%';
+
+        renderCharts(monthEntries);
+        renderCategoryCards(monthEntries);
+        buildInsights(monthEntries);
+        renderTable(monthEntries);
+      }
+
+      // Initial
+      populateCats();
+      dateEl.value = todayISO();
+      refresh();
+    });
+  </script>
+</body>
+</html>
